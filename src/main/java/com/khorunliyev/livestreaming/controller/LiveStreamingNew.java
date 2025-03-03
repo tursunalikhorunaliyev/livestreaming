@@ -13,54 +13,47 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/online")
 public class LiveStreamingNew {
     private Queue<String> playlist = new LinkedList<>();
     private final Sinks.Many<byte[]> sink = Sinks.many().multicast().directAllOrNothing();
-    private volatile int globalBytePosition = 0; // Global playback position
-    private volatile InputStream currentStream;
 
     public LiveStreamingNew(){
         playlist.add("oh i try - yaeow.mp3");
         startStreaming();
     }
 
-
-    private void startStreaming() {
-        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
-        executor.scheduleAtFixedRate(this::streamAudioChunk, 0, 100, TimeUnit.MILLISECONDS);
-    }
-
-    private void streamAudioChunk() {
-        try {
-            if (currentStream == null || currentStream.available() == 0) {
-                if (!playlist.isEmpty()) {
-                    currentStream = new ClassPathResource(playlist.poll()).getInputStream();
-                    globalBytePosition = 0;
-                } else {
-                    return;
+    private void startStreaming(){
+        Executors.newSingleThreadExecutor().execute(() -> {
+            while (true){
+                if (playlist.isEmpty()) {
+                    playlist.add("oh i try - yaeow.mp3");
+                }
+                try {
+                    String currentSong = playlist.poll();
+                    InputStream inputStream = new ClassPathResource(currentSong).getInputStream();
+                    byte[] buffer = new byte[4096];
+                    int byteRead;
+                    while ((byteRead=inputStream.read(buffer)) != -1){
+                        if (sink.currentSubscriberCount()!=0) { // Send only if listeners exist
+                            sink.tryEmitNext(buffer.clone());
+                        }
+                        //bitrate calculating
+                      /*  int bitRate = 128 * 1000; // 128 kbps
+                        int bytesPerSecond = bitRate / 8;
+                        int sleepTime = (4096 * 1000) / bytesPerSecond; // Calculate sleep time per chunk*/
+                        Thread.sleep(100);
+                    }
+                    inputStream.close();
+                }
+                catch (Exception e){
+                    e.printStackTrace();
                 }
             }
-
-            byte[] buffer = new byte[4096];
-            int bytesRead = currentStream.read(buffer);
-
-            if (bytesRead != -1) {
-                sink.tryEmitNext(buffer.clone()); // Send the same chunk to all users
-                globalBytePosition += bytesRead; // Update global position
-            } else {
-                currentStream.close();
-                currentStream = null;
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        });
     }
-
 
     @GetMapping(value = "/stream", produces = "audio/mpeg")
     public Flux<byte[]> streamAudio(){
